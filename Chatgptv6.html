@@ -1,0 +1,287 @@
+﻿<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <title>3D數學幾何遊戲</title>
+    <!-- 載入 Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+      body { margin: 0; overflow: hidden; }
+      #ui {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        z-index: 10;
+        background: rgba(255,255,255,0.8);
+        padding: 10px;
+        border-radius: 5px;
+      }
+      #ui button {
+        margin: 3px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- UI 介面 -->
+    <div id="ui">
+      <button id="btnRandom">隨機產生新物件</button>
+      <button id="btnTop">上視圖</button>
+      <button id="btnBottom">下視圖</button>
+      <button id="btnLeft">左視圖</button>
+      <button id="btnRight">右視圖</button>
+      <br>
+      <button id="btnVolume">計算體積</button>
+      <button id="btnSurface">計算面積</button>
+      <br>
+      <button id="btnScaleUp">放大</button>
+      <button id="btnScaleDown">縮小</button>
+      <br>
+      <div id="info" style="margin-top:10px;"></div>
+    </div>
+
+    <script>
+      // 基本 Three.js 設定
+      const scene = new THREE.Scene();
+      // 背景顏色設定為淺灰，避免與方塊同色
+      scene.background = new THREE.Color(0xeeeeee);
+      const camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 0.1, 1000);
+      camera.position.set(5, 5, 10);
+      camera.lookAt(0, 0, 0);
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement);
+
+      // 全域變數：儲存目前的立方體物件群組
+      let cubeGroup = new THREE.Group();
+      scene.add(cubeGroup);
+
+      // 用於動畫效果
+      let isAnimating = false;
+      const animationDuration = 300; // 毫秒
+
+      // 建立光源
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+      scene.add(ambientLight);
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6);
+      directionalLight.position.set(10, 10, 5);
+      scene.add(directionalLight);
+
+      // 產生隨機 3D 物件，n 立方體必須相鄰連結
+      function generateRandomObject() {
+        // 移除現有物件
+        scene.remove(cubeGroup);
+        cubeGroup = new THREE.Group();
+        scene.add(cubeGroup);
+
+        // 決定立方體數量（例如3到8個）
+        const n = Math.floor(Math.random() * 6) + 3;
+        const positions = new Set();
+        // 以 "x,y,z" 儲存位置
+        function posKey(x,y,z){ return `${x},${y},${z}`; }
+
+        // 從原點開始
+        positions.add(posKey(0,0,0));
+        const cubeSize = 1;
+        const cubes = [];
+        // 建立第一個立方體
+        cubes.push({ x: 0, y: 0, z: 0 });
+
+        // 可用的方向：六個鄰居
+        const dirs = [
+          {x:1,y:0,z:0}, {x:-1,y:0,z:0},
+          {x:0,y:1,z:0}, {x:0,y:-1,z:0},
+          {x:0,y:0,z:1}, {x:0,y:0,z:-1}
+        ];
+
+        // 隨機添加 n-1 個方塊，每個方塊必須與現有方塊相鄰
+        for(let i=1;i<n;i++){
+          // 從現有 cube 中隨機挑一個作為基準
+          const base = cubes[Math.floor(Math.random()*cubes.length)];
+          // 從六個方向隨機選一個
+          const shuffledDirs = dirs.slice().sort(()=> Math.random()-0.5);
+          let added = false;
+          for(const d of shuffledDirs) {
+            const nx = base.x + d.x;
+            const ny = base.y + d.y;
+            const nz = base.z + d.z;
+            if(!positions.has(posKey(nx,ny,nz))){
+              positions.add(posKey(nx,ny,nz));
+              cubes.push({x: nx, y: ny, z: nz});
+              added = true;
+              break;
+            }
+          }
+          // 若無法添加（理論上不會發生），則跳過
+          if(!added) continue;
+        }
+
+        // 建立立方體 mesh（每個顏色隨機，但不與背景相同）
+        cubes.forEach(pos => {
+          const color = new THREE.Color(Math.random(), Math.random(), Math.random());
+          // 保證顏色不與背景（0xeeeeee）相同，可進一步調整
+          const geometry = new THREE.BoxGeometry(cubeSize, cubeSize, cubeSize);
+          const material = new THREE.MeshLambertMaterial({ color: color });
+          const cube = new THREE.Mesh(geometry, material);
+          cube.position.set(pos.x, pos.y, pos.z);
+          cube.userData = { gridPos: {x: pos.x, y: pos.y, z: pos.z} };
+          cubeGroup.add(cube);
+        });
+      }
+
+      // 初始產生一個物件
+      generateRandomObject();
+
+      // 動畫函數：對 group 旋轉 90 度動畫
+      function animateRotation(axis, angle) {
+        if (isAnimating) return;
+        isAnimating = true;
+        const startRotation = cubeGroup.rotation[axis];
+        const endRotation = startRotation + angle;
+        const startTime = performance.now();
+
+        function update() {
+          const elapsed = performance.now() - startTime;
+          const t = Math.min(elapsed / animationDuration, 1);
+          cubeGroup.rotation[axis] = startRotation + (angle * t);
+          if (t < 1) {
+            requestAnimationFrame(update);
+          } else {
+            cubeGroup.rotation[axis] = endRotation;
+            isAnimating = false;
+          }
+        }
+        update();
+      }
+
+      // 鍵盤事件：上下左右旋轉（每次旋轉 90 度）
+      window.addEventListener('keydown', (e) => {
+        if (isAnimating) return;
+        switch(e.key) {
+          case 'ArrowUp':
+            // 向上旋轉：以 x 軸負方向旋轉 90°
+            animateRotation('x', -Math.PI/2);
+            break;
+          case 'ArrowDown':
+            // 向下旋轉：以 x 軸正方向旋轉 90°
+            animateRotation('x', Math.PI/2);
+            break;
+          case 'ArrowLeft':
+            // 向左旋轉：以 y 軸負方向旋轉 90°
+            animateRotation('y', -Math.PI/2);
+            break;
+          case 'ArrowRight':
+            // 向右旋轉：以 y 軸正方向旋轉 90°
+            animateRotation('y', Math.PI/2);
+            break;
+        }
+      });
+
+      // 視圖按鈕：直接設定 camera 位置
+      function setView(view) {
+        // 根據不同視角調整 camera 位置並看向原點
+        switch(view) {
+          case 'top':
+            camera.position.set(0, 10, 0.001);
+            break;
+          case 'bottom':
+            camera.position.set(0, -10, 0.001);
+            break;
+          case 'left':
+            camera.position.set(-10, 0, 0);
+            break;
+          case 'right':
+            camera.position.set(10, 0, 0);
+            break;
+        }
+        camera.lookAt(0, 0, 0);
+      }
+      document.getElementById('btnTop').addEventListener('click', ()=> setView('top'));
+      document.getElementById('btnBottom').addEventListener('click', ()=> setView('bottom'));
+      document.getElementById('btnLeft').addEventListener('click', ()=> setView('left'));
+      document.getElementById('btnRight').addEventListener('click', ()=> setView('right'));
+
+      // 隨機產生新物件
+      document.getElementById('btnRandom').addEventListener('click', () => {
+        // 重置 group 旋轉角度
+        cubeGroup.rotation.set(0,0,0);
+        generateRandomObject();
+      });
+
+      // 計算體積：實際上就是統計立方體個數
+      document.getElementById('btnVolume').addEventListener('click', () => {
+        const count = cubeGroup.children.length;
+        document.getElementById('info').innerText = "體積（立方體數量）：" + count;
+      });
+
+      // 計算外露面積：檢查每個立方體六個面是否被其他立方體遮蓋
+      document.getElementById('btnSurface').addEventListener('click', () => {
+        // 先將所有立方體的位置記錄下來（以格狀座標）
+        const grid = new Set();
+        cubeGroup.children.forEach(cube => {
+          const pos = cube.userData.gridPos;
+          grid.add(`${pos.x},${pos.y},${pos.z}`);
+        });
+        const dirs = [
+          {x:1,y:0,z:0},
+          {x:-1,y:0,z:0},
+          {x:0,y:1,z:0},
+          {x:0,y:-1,z:0},
+          {x:0,y:0,z:1},
+          {x:0,y:0,z:-1}
+        ];
+        let surfaceArea = 0;
+        cubeGroup.children.forEach(cube => {
+          const pos = cube.userData.gridPos;
+          dirs.forEach(d => {
+            const neighborKey = `${pos.x+d.x},${pos.y+d.y},${pos.z+d.z}`;
+            if(!grid.has(neighborKey)){
+              // 該面外露，面積設為 1
+              surfaceArea += 1;
+            }
+          });
+        });
+        document.getElementById('info').innerText = "外露表面總面積：" + surfaceArea;
+      });
+
+      // 放大與縮小功能：修改 cubeGroup.scale
+      document.getElementById('btnScaleUp').addEventListener('click', () => {
+        cubeGroup.scale.multiplyScalar(1.2);
+      });
+      document.getElementById('btnScaleDown').addEventListener('click', () => {
+        cubeGroup.scale.multiplyScalar(0.8);
+      });
+
+      // 點擊立方體刪除功能
+      const raycaster = new THREE.Raycaster();
+      const mouse = new THREE.Vector2();
+      function onMouseClick(event) {
+        // 將滑鼠點擊轉為標準化裝置座標 (-1~+1)
+        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObjects(cubeGroup.children);
+        if (intersects.length > 0) {
+          // 移除點擊到的第一個立方體
+          const selectedCube = intersects[0].object;
+          cubeGroup.remove(selectedCube);
+          // 也可同步更新 gridPos 資料，但此處簡單刪除即可
+        }
+      }
+      window.addEventListener('click', onMouseClick, false);
+
+      // 畫面自動調整大小
+      window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth/window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+
+      // 渲染迴圈
+      function animate() {
+        requestAnimationFrame(animate);
+        renderer.render(scene, camera);
+      }
+      animate();
+    </script>
+  </body>
+</html>
